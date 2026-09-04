@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#00826A">
+<title>Relevé de stock</title>
+<link rel="manifest" href="manifest.json">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+:root{
+  --ink:#16241C;
+  --paper:#E8ECE5;
+  --surface:#FFFFFF;
+  --line:#CFD8CD;
+  --green:#00826A;
+  --green-dark:#00604E;
+  --terre:#EB6B57;
+  --muted:#66756D;
+  --radius:14px;
+  --tap:56px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  margin:0;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:var(--paper);
+  color:var(--ink);
+  font-size:16px;
+  line-height:1.45;
+  overscroll-behavior-y:contain;
+}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+
+/* ---------- Structure ---------- */
+#app{display:flex;flex-direction:column;height:100dvh}
+header{
+  background:var(--green);color:#fff;
+  padding:10px 14px calc(10px) 14px;
+  display:flex;align-items:center;gap:10px;
+}
+header h1{font-size:15px;font-weight:600;margin:0;letter-spacing:.2px;flex:1}
+header .ctx{font-size:13px;opacity:.85;font-weight:400}
+.icon-btn{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:#fff;font-size:20px}
+.icon-btn:active{background:rgba(255,255,255,.18)}
+
+main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.view{display:none;padding:14px 14px 24px}
+.view.on{display:block}
+
+nav{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  background:var(--surface);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+nav button{
+  padding:9px 4px 11px;display:flex;flex-direction:column;align-items:center;gap:3px;
+  font-size:11.5px;color:var(--muted);font-weight:500;
+}
+nav button .g{font-size:21px;line-height:1}
+nav button.on{color:var(--green)}
+nav button .badge{
+  position:absolute;transform:translate(16px,-4px);
+  background:var(--terre);color:#fff;font-size:10px;font-weight:700;
+  min-width:17px;height:17px;border-radius:9px;display:grid;place-items:center;padding:0 4px;
+}
+
+/* ---------- Scanner ---------- */
+#reader{
+  width:100%;aspect-ratio:4/3;background:#0d1512;border-radius:var(--radius);
+  overflow:hidden;position:relative;display:grid;place-items:center;
+}
+#reader video{width:100%!important;height:100%!important;object-fit:cover}
+#reader__scan_region img{display:none}
+.cam-idle{color:#9fb3a9;text-align:center;font-size:14px;padding:20px;line-height:1.6}
+.cam-row{display:flex;gap:8px;margin-top:10px}
+.btn{
+  min-height:var(--tap);border-radius:var(--radius);font-weight:600;font-size:16px;
+  display:flex;align-items:center;justify-content:center;gap:8px;padding:0 16px;
+  border:1.5px solid transparent;transition:transform .06s;
+}
+.btn:active{transform:scale(.985)}
+.btn-primary{background:var(--green);color:#fff}
+.btn-ghost{background:var(--surface);color:var(--ink);border-color:var(--line)}
+.btn-danger{background:var(--surface);color:var(--terre);border-color:var(--terre)}
+.btn.full{width:100%}
+.btn.sm{min-height:42px;font-size:14px;border-radius:11px}
+
+.manual{display:flex;gap:8px;margin-top:10px}
+.manual input{
+  flex:1;min-height:var(--tap);border:1.5px solid var(--line);border-radius:var(--radius);
+  padding:0 14px;background:var(--surface);font-variant-numeric:tabular-nums;letter-spacing:.5px;
+}
+.manual input:focus{outline:2px solid var(--green);outline-offset:-1px;border-color:var(--green)}
+
+.tally{
+  margin-top:14px;background:var(--surface);border-radius:var(--radius);
+  padding:12px 14px;display:flex;justify-content:space-between;align-items:baseline;
+  border:1px solid var(--line);
+}
+.tally .n{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1}
+.tally .l{font-size:12.5px;color:var(--muted)}
+.tally > div{display:flex;flex-direction:column;gap:3px}
+.tally > div:last-child{align-items:flex-end}
+
+/* ---------- Fiche article (feuille) ---------- */
+.sheet-bg{
+  position:fixed;inset:0;background:rgba(10,20,16,.55);
+  display:none;align-items:flex-end;z-index:50;
+}
+.sheet-bg.on{display:flex}
+.sheet{
+  background:var(--surface);width:100%;border-radius:20px 20px 0 0;
+  padding:16px 16px calc(16px + env(safe-area-inset-bottom));
+  animation:up .18s ease-out;max-height:92dvh;overflow-y:auto;
+}
+@keyframes up{from{transform:translateY(22px)}to{transform:translateY(0)}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet .code{
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;
+  font-size:20px;font-weight:600;letter-spacing:.5px;
+}
+.sheet .desig{font-size:17px;margin:4px 0 0;font-weight:500}
+.sheet .desig.unknown{color:var(--terre)}
+.sheet .meta{font-size:13px;color:var(--muted);margin-top:2px}
+.already{
+  margin-top:12px;background:#EAF5F1;border-left:4px solid var(--green);
+  padding:9px 12px;border-radius:0 10px 10px 0;font-size:14px;
+}
+.qty-wrap{display:flex;gap:8px;margin-top:14px;align-items:stretch}
+.qty-wrap input{
+  flex:1;min-width:0;text-align:center;font-size:32px;font-weight:700;
+  font-variant-numeric:tabular-nums;border:1.5px solid var(--line);border-radius:var(--radius);
+  padding:10px;background:var(--paper);
+}
+.qty-wrap input:focus{outline:2px solid var(--green);outline-offset:-1px}
+.step{width:58px;border:1.5px solid var(--line);border-radius:var(--radius);background:var(--surface);font-size:26px;font-weight:600;color:var(--green)}
+.chips{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap}
+.chip{
+  padding:8px 13px;border-radius:20px;background:var(--paper);border:1px solid var(--line);
+  font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;
+}
+.chip:active{background:var(--green);color:#fff;border-color:var(--green)}
+.sheet-actions{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+.sheet-sub{display:flex;gap:8px}
+.sheet-sub .btn{flex:1}
+
+/* ---------- Liste relevé ---------- */
+.section-head{display:flex;justify-content:space-between;align-items:center;margin:0 0 10px}
+.section-head h2{font-size:17px;margin:0;font-weight:600}
+.empty{
+  background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius);
+  padding:28px 20px;text-align:center;color:var(--muted);font-size:14.5px;line-height:1.6;
+}
+.item{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:11px 12px;margin-bottom:8px;display:flex;gap:12px;align-items:center;
+}
+.item .txt{flex:1;min-width:0}
+.item .c{font-family:ui-monospace,Menlo,monospace;font-size:14px;font-weight:600}
+.item .d{font-size:14px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .d.unknown{color:var(--terre)}
+.item input.q{
+  width:82px;text-align:center;font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;
+  border:1.5px solid var(--line);border-radius:11px;padding:8px 4px;background:var(--paper);
+}
+.item .del{width:36px;height:36px;border-radius:9px;color:var(--terre);font-size:20px;display:grid;place-items:center}
+.item .del:active{background:#FDEEEB}
+
+/* ---------- Base articles ---------- */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px}
+.card h3{margin:0 0 6px;font-size:15.5px;font-weight:600}
+.card p{margin:0 0 10px;font-size:14px;color:var(--muted);line-height:1.55}
+.card code{background:var(--paper);padding:2px 6px;border-radius:5px;font-size:13px}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.field label{font-size:13px;color:var(--muted);font-weight:500}
+.field input{min-height:48px;border:1.5px solid var(--line);border-radius:11px;padding:0 12px;background:var(--surface)}
+.field input:focus{outline:2px solid var(--green);outline-offset:-1px}
+.stat{font-size:15px;font-weight:600}
+.stat span{color:var(--green);font-variant-numeric:tabular-nums}
+
+.toast{
+  position:fixed;left:50%;bottom:78px;transform:translateX(-50%) translateY(10px);
+  background:var(--ink);color:#fff;padding:11px 18px;border-radius:24px;font-size:14.5px;
+  font-weight:500;opacity:0;pointer-events:none;transition:.2s;z-index:80;max-width:88vw;text-align:center;
+}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+:focus-visible{outline:3px solid var(--terre);outline-offset:2px}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div style="flex:1;min-width:0">
+      <h1>Relevé de stock</h1>
+      <div class="ctx" id="ctxLabel">Site non renseigné</div>
+    </div>
+    <button class="icon-btn" id="btnTorch" title="Éclairage" hidden>&#9728;</button>
+  </header>
+
+  <main>
+    <!-- ============ SCANNER ============ -->
+    <section class="view on" id="v-scan">
+      <div id="reader"><div class="cam-idle" id="camIdle">Appuyez sur « Démarrer la caméra »<br>puis visez un code-barres article.</div></div>
+
+      <div class="cam-row">
+        <button class="btn btn-primary full" id="btnCam">Démarrer la caméra</button>
+      </div>
+
+      <div class="manual">
+        <input id="manualCode" inputmode="numeric" placeholder="Saisir un code à la main" autocomplete="off">
+        <button class="btn btn-ghost" id="btnManual" style="padding:0 18px">OK</button>
+      </div>
+
+      <div class="tally">
+        <div><span class="n" id="tallyLines">0</span><span class="l">articles relevés</span></div>
+        <div><span class="n" id="tallyUnits">0</span><span class="l">unités au total</span></div>
+      </div>
+    </section>
+
+    <!-- ============ RELEVÉ ============ -->
+    <section class="view" id="v-list">
+      <div class="section-head">
+        <h2>Relevé en cours</h2>
+        <button class="btn btn-ghost sm" id="btnClear">Vider</button>
+      </div>
+      <div id="listBox"></div>
+      <div id="exportBox" style="margin-top:16px;display:none">
+        <button class="btn btn-primary full" id="btnWa" style="margin-bottom:8px">Envoyer par WhatsApp</button>
+        <button class="btn btn-ghost full" id="btnMail" style="margin-bottom:8px">Envoyer par e-mail</button>
+        <div class="sheet-sub">
+          <button class="btn btn-ghost sm" id="btnCsv">Fichier CSV</button>
+          <button class="btn btn-ghost sm" id="btnCopy">Copier le texte</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ RÉGLAGES / BASE ============ -->
+    <section class="view" id="v-base">
+      <div class="card">
+        <h3>Site et opérateur</h3>
+        <div class="field"><label for="fSite">Site de production</label><input id="fSite" placeholder="Ex. Saint-Jean"></div>
+        <div class="field" style="margin-bottom:0"><label for="fOp">Nom de l'opérateur</label><input id="fOp" placeholder="Ex. Muriel"></div>
+      </div>
+
+      <div class="card">
+        <h3>Base articles</h3>
+        <p>Fichier CSV avec une ligne par article : <code>code;désignation;unité</code>. Exportez-le depuis Excel en « CSV (séparateur point-virgule) ».</p>
+        <div class="stat" style="margin-bottom:10px">Articles chargés : <span id="baseCount">0</span></div>
+        <input type="file" id="fileBase" accept=".csv,.txt" hidden>
+        <button class="btn btn-primary full" id="btnImport" style="margin-bottom:8px">Importer un fichier CSV</button>
+        <button class="btn btn-danger full sm" id="btnBaseClear">Supprimer la base</button>
+      </div>
+
+      <div class="card">
+        <h3>Destinataires par défaut</h3>
+        <div class="field"><label for="fMail">Adresse e-mail</label><input id="fMail" type="email" inputmode="email" placeholder="commandes@exemple.fr"></div>
+        <div class="field" style="margin-bottom:0"><label for="fTel">Numéro WhatsApp (format 33612345678)</label><input id="fTel" inputmode="tel" placeholder="33612345678"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav>
+    <button class="on" data-view="v-scan"><span class="g">&#9635;</span>Scanner</button>
+    <button data-view="v-list"><span class="g">&#9776;</span>Relevé<span class="badge" id="navBadge" hidden>0</span></button>
+    <button data-view="v-base"><span class="g">&#9881;</span>Réglages</button>
+  </nav>
+</div>
+
+<!-- Fiche article -->
+<div class="sheet-bg" id="sheetBg">
+  <div class="sheet" role="dialog" aria-modal="true">
+    <div class="code" id="sCode">—</div>
+    <p class="desig" id="sDesig">—</p>
+    <div class="meta" id="sMeta"></div>
+    <div class="already" id="sAlready" hidden></div>
+
+    <div class="qty-wrap">
+      <button class="step" id="sMinus" aria-label="Diminuer">−</button>
+      <input id="sQty" type="number" inputmode="numeric" min="0" step="1" value="0">
+      <button class="step" id="sPlus" aria-label="Augmenter">+</button>
+    </div>
+    <div class="chips" id="sChips"></div>
+
+    <div class="sheet-actions">
+      <button class="btn btn-primary full" id="sAdd">Ajouter au relevé</button>
+      <div class="sheet-sub">
+        <button class="btn btn-ghost sm" id="sReplace">Remplacer la quantité</button>
+        <button class="btn btn-ghost sm" id="sCancel">Annuler</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   Stockage (localStorage avec repli mémoire)
+============================================================ */
+const mem = {};
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v===null ? (k in mem ? mem[k] : d) : JSON.parse(v); }catch(e){ return k in mem ? mem[k] : d; } },
+  set(k, v){ mem[k]=v; try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+};
+const K = { BASE:'rs_base_v1', LIST:'rs_list_v1', CTX:'rs_ctx_v1' };
+
+let base  = store.get(K.BASE, {});          // { code: {d: désignation, u: unité} }
+let items = store.get(K.LIST, []);          // [{code, d, q}]
+let ctx   = store.get(K.CTX, {site:'', op:'', mail:'', tel:''});
+
+/* ============================================================
+   Utilitaires
+============================================================ */
+const $ = id => document.getElementById(id);
+const nf = new Intl.NumberFormat('fr-FR');
+let toastT;
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(toastT); toastT = setTimeout(()=>t.classList.remove('on'), 2200);
+}
+function beep(ok=true){
+  try{
+    const a = new (window.AudioContext||window.webkitAudioContext)();
+    const o = a.createOscillator(), g = a.createGain();
+    o.connect(g); g.connect(a.destination);
+    o.frequency.value = ok ? 1180 : 340;
+    g.gain.setValueAtTime(.14, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001, a.currentTime + .16);
+    o.start(); o.stop(a.currentTime + .17);
+  }catch(e){}
+  if(navigator.vibrate) navigator.vibrate(ok ? 45 : [60,50,60]);
+}
+function stamp(){
+  const d = new Date();
+  return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+}
+
+/* ============================================================
+   Navigation
+============================================================ */
+document.querySelectorAll('nav button').forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); $(b.dataset.view).classList.add('on');
+    if(b.dataset.view!=='v-scan') stopCam();
+  };
+});
+
+/* ============================================================
+   Contexte (site / opérateur / destinataires)
+============================================================ */
+function paintCtx(){
+  $('fSite').value = ctx.site; $('fOp').value = ctx.op;
+  $('fMail').value = ctx.mail; $('fTel').value = ctx.tel;
+  $('ctxLabel').textContent = ctx.site
+    ? ctx.site + (ctx.op ? ' · ' + ctx.op : '')
+    : 'Site non renseigné';
+}
+[['fSite','site'],['fOp','op'],['fMail','mail'],['fTel','tel']].forEach(([id,key])=>{
+  $(id).addEventListener('input', e=>{ ctx[key]=e.target.value.trim(); store.set(K.CTX,ctx); paintCtx(); });
+});
+
+/* ============================================================
+   Base articles — import CSV
+============================================================ */
+$('btnImport').onclick = ()=> $('fileBase').click();
+$('fileBase').onchange = e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = ev=>{ importCsv(ev.target.result); e.target.value=''; };
+  r.readAsText(f, 'windows-1252');   // Excel FR par défaut ; UTF-8 géré ci-dessous
+};
+function importCsv(txt){
+  if(/�/.test(txt)===false && /Ã©|Ã¨|Ã /.test(txt)) txt = decodeURIComponent(escape(txt));
+  txt = txt.replace(/^\uFEFF/, '');
+  const lines = txt.split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length){ toast('Fichier vide'); return; }
+  const sep = [';','\t',','].map(s=>({s,n:(lines[0].match(new RegExp('\\'+s,'g'))||[]).length}))
+                            .sort((a,b)=>b.n-a.n)[0].s;
+  const out = {}; let skipped = 0;
+  lines.forEach((line,i)=>{
+    const c = line.split(sep).map(x=>x.trim().replace(/^"|"$/g,''));
+    const code = (c[0]||'').replace(/\s/g,'');
+    if(!code){ skipped++; return; }
+    if(i===0 && /^(code|article|ean|ref)/i.test(code) && !/^\d+$/.test(code)){ return; }
+    out[code] = { d: c[1] || '', u: c[2] || '' };
+  });
+  const n = Object.keys(out).length;
+  if(!n){ toast('Aucun article reconnu'); return; }
+  base = out; store.set(K.BASE, base); paintBase();
+  toast(nf.format(n) + ' articles importés');
+}
+function paintBase(){ $('baseCount').textContent = nf.format(Object.keys(base).length); }
+$('btnBaseClear').onclick = ()=>{
+  if(!confirm('Supprimer la base articles ?')) return;
+  base = {}; store.set(K.BASE, base); paintBase(); toast('Base supprimée');
+};
+
+/* ============================================================
+   Caméra + scan
+============================================================ */
+let scanner = null, running = false, lastCode = '', lastTime = 0;
+
+$('btnCam').onclick = ()=> running ? stopCam() : startCam();
+
+async function startCam(){
+  if(typeof Html5Qrcode === 'undefined'){ toast('Module de scan non chargé'); return; }
+  try{
+    $('camIdle').style.display = 'none';
+    scanner = new Html5Qrcode('reader', {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,  Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.ITF, Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.DATA_MATRIX
+      ],
+      experimentalFeatures:{ useBarCodeDetectorIfSupported:true },
+      verbose:false
+    });
+    await scanner.start(
+      { facingMode:'environment' },
+      { fps:10, qrbox:(w,h)=>({ width:Math.floor(Math.min(w,h)*.82), height:Math.floor(Math.min(w,h)*.45) }) },
+      onScan, ()=>{}
+    );
+    running = true;
+    $('btnCam').textContent = 'Arrêter la caméra';
+    $('btnCam').classList.replace('btn-primary','btn-ghost');
+    $('btnTorch').hidden = false;
+  }catch(err){
+    $('camIdle').style.display = '';
+    $('camIdle').innerHTML = 'Caméra inaccessible.<br>Vérifiez l\'autorisation dans le navigateur,<br>et que la page est bien servie en HTTPS.';
+    toast('Caméra refusée');
+  }
+}
+async function stopCam(){
+  if(scanner && running){ try{ await scanner.stop(); scanner.clear(); }catch(e){} }
+  running = false; scanner = null;
+  $('btnCam').textContent = 'Démarrer la caméra';
+  $('btnCam').classList.replace('btn-ghost','btn-primary');
+  $('btnTorch').hidden = true;
+  $('camIdle').style.display = '';
+}
+$('btnTorch').onclick = async ()=>{
+  if(!scanner) return;
+  torchOn = !torchOn;
+  try{ await scanner.applyVideoConstraints({ advanced:[{ torch: torchOn }] }); }
+  catch(e){ toast('Éclairage non disponible'); }
+};
+let torchOn = false;
+
+function onScan(code){
+  const now = Date.now();
+  if(code === lastCode && now - lastTime < 2500) return;
+  lastCode = code; lastTime = now;
+  openSheet(code.trim());
+}
+
+/* Saisie manuelle */
+$('btnManual').onclick = ()=>{
+  const c = $('manualCode').value.trim();
+  if(!c) return;
+  $('manualCode').value = '';
+  $('manualCode').blur();
+  openSheet(c);
+};
+$('manualCode').addEventListener('keydown', e=>{ if(e.key==='Enter') $('btnManual').click(); });
+
+/* ============================================================
+   Fiche article
+============================================================ */
+let current = null;
+const CHIPS = [1, 6, 12, 24, 50, 100];
+
+function openSheet(code){
+  const known = base[code];
+  const exist = items.find(i=>i.code===code);
+  current = { code, d: known ? known.d : '', u: known ? known.u : '', known: !!known };
+
+  beep(!!known);
+  $('sCode').textContent = code;
+  $('sDesig').textContent = known && known.d ? known.d : (known ? '(désignation absente de la base)' : 'Article inconnu de la base');
+  $('sDesig').classList.toggle('unknown', !known);
+  $('sMeta').textContent = current.u ? 'Unité : ' + current.u : '';
+
+  if(exist){
+    $('sAlready').hidden = false;
+    $('sAlready').innerHTML = 'Déjà relevé : <strong>' + nf.format(exist.q) + '</strong>. La quantité saisie sera ajoutée.';
+  } else $('sAlready').hidden = true;
+
+  $('sQty').value = 0;
+  $('sChips').innerHTML = CHIPS.map(n=>'<button class="chip" data-n="'+n+'">+'+n+'</button>').join('');
+  $('sChips').querySelectorAll('.chip').forEach(c=>{
+    c.onclick = ()=>{ $('sQty').value = (parseInt($('sQty').value)||0) + parseInt(c.dataset.n); };
+  });
+  $('sheetBg').classList.add('on');
+  setTimeout(()=>{ $('sQty').focus(); $('sQty').select(); }, 120);
+}
+function closeSheet(){ $('sheetBg').classList.remove('on'); current = null; lastTime = Date.now(); }
+
+$('sPlus').onclick  = ()=> $('sQty').value = (parseInt($('sQty').value)||0) + 1;
+$('sMinus').onclick = ()=> $('sQty').value = Math.max(0,(parseInt($('sQty').value)||0) - 1);
+$('sCancel').onclick = closeSheet;
+$('sheetBg').onclick = e=>{ if(e.target === $('sheetBg')) closeSheet(); };
+
+$('sAdd').onclick     = ()=> commit(false);
+$('sReplace').onclick = ()=> commit(true);
+
+function commit(replace){
+  const q = parseInt($('sQty').value) || 0;
+  if(q <= 0 && !replace){ toast('Saisissez une quantité'); return; }
+  const ex = items.find(i=>i.code === current.code);
+  if(ex){
+    ex.q = replace ? q : ex.q + q;
+    ex.d = ex.d || current.d;
+    toast(replace ? 'Quantité remplacée : ' + nf.format(ex.q) : 'Cumul : ' + nf.format(ex.q));
+    if(ex.q <= 0) items = items.filter(i=>i !== ex);
+  }else{
+    items.push({ code: current.code, d: current.d, q });
+    toast('Ajouté : ' + nf.format(q));
+  }
+  save(); closeSheet();
+}
+
+/* ============================================================
+   Relevé
+============================================================ */
+function save(){ store.set(K.LIST, items); paintList(); }
+
+function paintList(){
+  const lines = items.length;
+  const units = items.reduce((s,i)=>s + i.q, 0);
+  $('tallyLines').textContent = nf.format(lines);
+  $('tallyUnits').textContent = nf.format(units);
+  $('navBadge').hidden = !lines; $('navBadge').textContent = lines;
+
+  const box = $('listBox');
+  if(!lines){
+    box.innerHTML = '<div class="empty">Aucun article relevé.<br>Scannez un code-barres pour commencer.</div>';
+    $('exportBox').style.display = 'none';
+    return;
+  }
+  $('exportBox').style.display = '';
+  box.innerHTML = items.map((it,idx)=>`
+    <div class="item">
+      <div class="txt">
+        <div class="c">${esc(it.code)}</div>
+        <div class="d ${it.d?'':'unknown'}">${esc(it.d || 'Article inconnu')}</div>
+      </div>
+      <input class="q" type="number" inputmode="numeric" min="0" value="${it.q}" data-i="${idx}">
+      <button class="del" data-i="${idx}" aria-label="Supprimer">&times;</button>
+    </div>`).join('');
+
+  box.querySelectorAll('input.q').forEach(inp=>{
+    inp.onchange = ()=>{
+      const v = parseInt(inp.value) || 0;
+      if(v <= 0) items.splice(+inp.dataset.i, 1); else items[+inp.dataset.i].q = v;
+      save();
+    };
+  });
+  box.querySelectorAll('.del').forEach(b=>{
+    b.onclick = ()=>{ items.splice(+b.dataset.i, 1); save(); };
+  });
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+$('btnClear').onclick = ()=>{
+  if(!items.length) return;
+  if(!confirm('Vider le relevé en cours ?')) return;
+  items = []; save(); toast('Relevé vidé');
+};
+
+/* ============================================================
+   Export
+============================================================ */
+function buildText(){
+  const head = 'RELEVÉ DE STOCK'
+    + (ctx.site ? '\nSite : ' + ctx.site : '')
+    + (ctx.op   ? '\nOpérateur : ' + ctx.op : '')
+    + '\nDate : ' + stamp() + '\n';
+  const body = items.map(i=> i.code + ' ; ' + (i.d || '?') + ' ; ' + i.q).join('\n');
+  const foot = '\n\n' + items.length + ' article(s) — '
+    + nf.format(items.reduce((s,i)=>s+i.q,0)) + ' unité(s)';
+  return head + '\n' + body + foot;
+}
+function buildCsv(){
+  const rows = [['Code','Désignation','Quantité','Site','Opérateur','Date']];
+  const d = stamp();
+  items.forEach(i=> rows.push([i.code, i.d, i.q, ctx.site, ctx.op, d]));
+  return '\uFEFF' + rows.map(r=>r.map(v=>'"' + String(v).replace(/"/g,'""') + '"').join(';')).join('\r\n');
+}
+
+$('btnWa').onclick = ()=>{
+  const txt = encodeURIComponent(buildText());
+  const tel = (ctx.tel || '').replace(/\D/g,'');
+  window.open('https://wa.me/' + tel + '?text=' + txt, '_blank');
+};
+$('btnMail').onclick = ()=>{
+  const sujet = 'Relevé de stock' + (ctx.site ? ' — ' + ctx.site : '') + ' — ' + new Date().toLocaleDateString('fr-FR');
+  location.href = 'mailto:' + encodeURIComponent(ctx.mail||'')
+    + '?subject=' + encodeURIComponent(sujet)
+    + '&body=' + encodeURIComponent(buildText());
+};
+$('btnCsv').onclick = ()=>{
+  const blob = new Blob([buildCsv()], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'releve_' + (ctx.site||'site').replace(/\W+/g,'-') + '_'
+    + new Date().toISOString().slice(0,10) + '.csv';
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$('btnCopy').onclick = async ()=>{
+  try{ await navigator.clipboard.writeText(buildText()); toast('Texte copié'); }
+  catch(e){ toast('Copie impossible'); }
+};
+
+/* ============================================================
+   Démarrage
+============================================================ */
+paintCtx(); paintBase(); paintList();
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+window.addEventListener('beforeunload', e=>{ if(items.length){ e.preventDefault(); e.returnValue=''; } });
+</script>
+</body>
+</html>
