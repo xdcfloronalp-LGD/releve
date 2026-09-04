@@ -1,0 +1,19 @@
+{
+  "name": "Relevé de stock",
+  "short_name": "Relevé",
+  "description": "Relevé de stock par scan de code-barres sur les sites de production",
+  "start_url": "./releve-stock.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#E8ECE5",
+  "theme_color": "#00826A",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjExMCIgZmlsbD0iIzAwODI2QSIvPjxnIGZpbGw9IiNmZmYiPjxyZWN0IHg9IjEyOCIgeT0iMTYwIiB3aWR0aD0iMjQiIGhlaWdodD0iMTkyIi8+PHJlY3QgeD0iMTY4IiB5PSIxNjAiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxOTIiLz48cmVjdCB4PSIxOTgiIHk9IjE2MCIgd2lkdGg9IjMyIiBoZWlnaHQ9IjE5MiIvPjxyZWN0IHg9IjI0NiIgeT0iMTYwIiB3aWR0aD0iMTQiIGhlaWdodD0iMTkyIi8+PHJlY3QgeD0iMjc2IiB5PSIxNjAiIHdpZHRoPSIyNCIgaGVpZ2h0PSIxOTIiLz48cmVjdCB4PSIzMTYiIHk9IjE2MCIgd2lkdGg9IjE0IiBoZWlnaHQ9IjE5MiIvPjxyZWN0IHg9IjM0NiIgeT0iMTYwIiB3aWR0aD0iMzgiIGhlaWdodD0iMTkyIi8+PC9nPjwvc3ZnPg==",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
