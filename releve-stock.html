@@ -247,11 +247,23 @@ nav button .badge{
       </div>
 
       <div class="card">
+        <h3>Base articles en ligne</h3>
+        <p>Le fichier <code>articles.enc</code> déposé à côté de l'application est chiffré. Saisissez la phrase secrète pour que le téléphone puisse le lire.</p>
+        <div class="field"><label for="fPass">Phrase secrète</label><input id="fPass" type="password" autocomplete="off" placeholder="••••••••"></div>
+        <div class="stat" style="margin-bottom:10px;font-weight:500;color:var(--muted)">Dernière synchro : <span id="syncLabel">jamais</span></div>
+        <button class="btn btn-primary full" id="btnSync">Synchroniser maintenant</button>
+      </div>
+
+      <div class="card">
         <h3>Base articles</h3>
-        <p>Fichier CSV avec une ligne par article : <code>code;désignation;unité</code>. Exportez-le depuis Excel en « CSV (séparateur point-virgule) ».</p>
-        <div class="stat" style="margin-bottom:10px">Articles chargés : <span id="baseCount">0</span></div>
+        <p>Fichier CSV à 4 colonnes, première ligne = libellés :<br>
+        <code>code-barres ; code-barres 2 ; n° article ; désignation</code><br>
+        Le scan cherche dans les 3 premières colonnes. Export Excel en « CSV (séparateur point-virgule) ».</p>
+        <div class="stat" style="margin-bottom:3px">Articles : <span id="baseCount">0</span></div>
+        <div class="stat" style="margin-bottom:12px;font-weight:500;color:var(--muted)">Codes reconnus : <span id="codeCount">0</span></div>
+        <p style="margin-top:-2px">Import manuel, en secours si la synchronisation n'est pas disponible.</p>
         <input type="file" id="fileBase" accept=".csv,.txt" hidden>
-        <button class="btn btn-primary full" id="btnImport" style="margin-bottom:8px">Importer un fichier CSV</button>
+        <button class="btn btn-ghost full" id="btnImport" style="margin-bottom:8px">Importer un fichier CSV</button>
         <button class="btn btn-danger full sm" id="btnBaseClear">Supprimer la base</button>
       </div>
 
@@ -306,11 +318,18 @@ const store = {
   get(k, d){ try{ const v = localStorage.getItem(k); return v===null ? (k in mem ? mem[k] : d) : JSON.parse(v); }catch(e){ return k in mem ? mem[k] : d; } },
   set(k, v){ mem[k]=v; try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
-const K = { BASE:'rs_base_v1', LIST:'rs_list_v1', CTX:'rs_ctx_v1' };
+const K = { BASE:'rs_base_v2', LIST:'rs_list_v1', CTX:'rs_ctx_v1' };
 
-let base  = store.get(K.BASE, {});          // { code: {d: désignation, u: unité} }
-let items = store.get(K.LIST, []);          // [{code, d, q}]
-let ctx   = store.get(K.CTX, {site:'', op:'', mail:'', tel:''});
+/* base.index : { codeNormalisé -> n° article }  (colonnes 1, 2 et 3)
+   base.arts  : { n° article -> { d: désignation } } */
+const EMPTY = { index:{}, arts:{} };
+let base  = store.get(K.BASE, EMPTY);
+if(!base || !base.index || !base.arts) base = { index:{}, arts:{} };
+let items = store.get(K.LIST, []);          // [{code: n° article, d, q}]
+let ctx   = store.get(K.CTX, {site:'', op:'', mail:'', tel:'', pass:'', sync:''});
+
+/* Normalisation des codes : sans espaces, en majuscules */
+const norm = s => String(s == null ? '' : s).replace(/\s/g,'').toUpperCase();
 
 /* ============================================================
    Utilitaires
@@ -357,11 +376,13 @@ document.querySelectorAll('nav button').forEach(b=>{
 function paintCtx(){
   $('fSite').value = ctx.site; $('fOp').value = ctx.op;
   $('fMail').value = ctx.mail; $('fTel').value = ctx.tel;
+  $('fPass').value = ctx.pass || '';
+  $('syncLabel').textContent = ctx.sync || 'jamais';
   $('ctxLabel').textContent = ctx.site
     ? ctx.site + (ctx.op ? ' · ' + ctx.op : '')
     : 'Site non renseigné';
 }
-[['fSite','site'],['fOp','op'],['fMail','mail'],['fTel','tel']].forEach(([id,key])=>{
+[['fSite','site'],['fOp','op'],['fMail','mail'],['fTel','tel'],['fPass','pass']].forEach(([id,key])=>{
   $(id).addEventListener('input', e=>{ ctx[key]=e.target.value.trim(); store.set(K.CTX,ctx); paintCtx(); });
 });
 
@@ -382,24 +403,68 @@ function importCsv(txt){
   if(!lines.length){ toast('Fichier vide'); return; }
   const sep = [';','\t',','].map(s=>({s,n:(lines[0].match(new RegExp('\\'+s,'g'))||[]).length}))
                             .sort((a,b)=>b.n-a.n)[0].s;
-  const out = {}; let skipped = 0;
-  lines.forEach((line,i)=>{
-    const c = line.split(sep).map(x=>x.trim().replace(/^"|"$/g,''));
-    const code = (c[0]||'').replace(/\s/g,'');
-    if(!code){ skipped++; return; }
-    if(i===0 && /^(code|article|ean|ref)/i.test(code) && !/^\d+$/.test(code)){ return; }
-    out[code] = { d: c[1] || '', u: c[2] || '' };
-  });
-  const n = Object.keys(out).length;
-  if(!n){ toast('Aucun article reconnu'); return; }
+  const build = rows => {
+    const index = {}, arts = {};
+    rows.forEach(line=>{
+      const c = line.split(sep).map(x=>x.trim().replace(/^"|"$/g,''));
+      const ref = (c[2] || '').trim();          // colonne 3 : n° article
+      if(!ref) return;
+      arts[ref] = { d: (c[3] || '').trim() };   // colonne 4 : désignation
+      [c[0], c[1], ref].forEach(k=>{            // colonnes 1, 2 et 3 : codes cherchés
+        const key = norm(k);
+        if(key) index[key] = ref;
+      });
+    });
+    return { index, arts };
+  };
+
+  let out = build(lines.slice(1));                       // 1re ligne = libellés
+  if(!Object.keys(out.arts).length) out = build(lines);  // repli si pas d'en-tête
+
+  const nArt = Object.keys(out.arts).length;
+  if(!nArt){ toast('Aucun article reconnu — vérifiez les colonnes'); return; }
   base = out; store.set(K.BASE, base); paintBase();
-  toast(nf.format(n) + ' articles importés');
+  toast(nf.format(nArt) + ' articles, ' + nf.format(Object.keys(out.index).length) + ' codes');
 }
-function paintBase(){ $('baseCount').textContent = nf.format(Object.keys(base).length); }
+function paintBase(){
+  $('baseCount').textContent = nf.format(Object.keys(base.arts).length);
+  $('codeCount').textContent = nf.format(Object.keys(base.index).length);
+}
 $('btnBaseClear').onclick = ()=>{
   if(!confirm('Supprimer la base articles ?')) return;
-  base = {}; store.set(K.BASE, base); paintBase(); toast('Base supprimée');
+  base = { index:{}, arts:{} }; store.set(K.BASE, base); paintBase(); toast('Base supprimée');
 };
+
+/* ============================================================
+   Synchronisation chiffrée (articles.enc, AES-GCM 256)
+============================================================ */
+async function deriveKey(pass, salt){
+  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations:200000, hash:'SHA-256' },
+    km, { name:'AES-GCM', length:256 }, false, ['decrypt']
+  );
+}
+async function syncBase(silent){
+  const pass = (ctx.pass || '').trim();
+  if(!pass){ if(!silent) toast('Renseignez la phrase secrète'); return; }
+  if(!silent) toast('Synchronisation…');
+  try{
+    const r = await fetch('articles.enc?t=' + Date.now(), { cache:'no-store' });
+    if(!r.ok) throw new Error('fichier absent');
+    const raw = Uint8Array.from(atob((await r.text()).replace(/\s/g,'')), c=>c.charCodeAt(0));
+    if(raw.length < 40) throw new Error('fichier invalide');
+    const key   = await deriveKey(pass, raw.slice(0,16));
+    const plain = new TextDecoder().decode(
+      await crypto.subtle.decrypt({ name:'AES-GCM', iv: raw.slice(16,28) }, key, raw.slice(28))
+    );
+    importCsv(plain);
+    ctx.sync = stamp(); store.set(K.CTX, ctx); $('syncLabel').textContent = ctx.sync;
+  }catch(e){
+    if(!silent) toast(/absent|invalide/.test(e.message) ? 'Fichier articles.enc introuvable' : 'Phrase secrète incorrecte');
+  }
+}
+$('btnSync').onclick = ()=> syncBase(false);
 
 /* ============================================================
    Caméra + scan
@@ -477,16 +542,20 @@ $('manualCode').addEventListener('keydown', e=>{ if(e.key==='Enter') $('btnManua
 let current = null;
 const CHIPS = [1, 6, 12, 24, 50, 100];
 
-function openSheet(code){
-  const known = base[code];
-  const exist = items.find(i=>i.code===code);
-  current = { code, d: known ? known.d : '', u: known ? known.u : '', known: !!known };
+function openSheet(scanned){
+  const key = norm(scanned);
+  const ref = base.index[key];               // n° article trouvé via colonne 1, 2 ou 3
+  const art = ref ? base.arts[ref] : null;
+  const known = !!ref;
+  const code = known ? ref : scanned.trim(); // à défaut, on garde le code scanné
+  const exist = items.find(i=>i.code === code);
+  current = { code, d: art ? art.d : '', known };
 
-  beep(!!known);
+  beep(known);
   $('sCode').textContent = code;
-  $('sDesig').textContent = known && known.d ? known.d : (known ? '(désignation absente de la base)' : 'Article inconnu de la base');
+  $('sDesig').textContent = known ? (art.d || '(désignation absente de la base)') : 'Code inconnu de la base';
   $('sDesig').classList.toggle('unknown', !known);
-  $('sMeta').textContent = current.u ? 'Unité : ' + current.u : '';
+  $('sMeta').textContent = (known && norm(code) !== key) ? 'Code-barres scanné : ' + scanned.trim() : '';
 
   if(exist){
     $('sAlready').hidden = false;
@@ -589,7 +658,7 @@ function buildText(){
   return head + '\n' + body + foot;
 }
 function buildCsv(){
-  const rows = [['Code','Désignation','Quantité','Site','Opérateur','Date']];
+  const rows = [['Code article','Désignation','Quantité','Site','Opérateur','Date']];
   const d = stamp();
   items.forEach(i=> rows.push([i.code, i.d, i.q, ctx.site, ctx.op, d]));
   return '\uFEFF' + rows.map(r=>r.map(v=>'"' + String(v).replace(/"/g,'""') + '"').join(';')).join('\r\n');
@@ -623,6 +692,7 @@ $('btnCopy').onclick = async ()=>{
    Démarrage
 ============================================================ */
 paintCtx(); paintBase(); paintList();
+if(ctx.pass) syncBase(true);
 if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
 window.addEventListener('beforeunload', e=>{ if(items.length){ e.preventDefault(); e.returnValue=''; } });
 </script>

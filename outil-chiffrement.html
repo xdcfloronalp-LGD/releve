@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chiffrer la base articles</title>
+<style>
+:root{--ink:#16241C;--paper:#E8ECE5;--surface:#fff;--line:#CFD8CD;--green:#00826A;--terre:#EB6B57;--muted:#66756D}
+*{box-sizing:border-box}
+body{margin:0;padding:28px 18px 60px;background:var(--paper);color:var(--ink);
+     font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5}
+.wrap{max-width:620px;margin:0 auto}
+h1{font-size:23px;margin:0 0 4px;font-weight:650}
+.sub{color:var(--muted);font-size:14.5px;margin:0 0 24px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 10px;font-weight:600}
+label{display:block;font-size:13px;color:var(--muted);font-weight:500;margin-bottom:5px}
+input[type=password],input[type=file]{width:100%;min-height:48px;border:1.5px solid var(--line);
+  border-radius:11px;padding:10px 12px;background:var(--surface);font:inherit;color:inherit}
+input:focus{outline:2px solid var(--green);outline-offset:-1px}
+button{width:100%;min-height:54px;border:0;border-radius:14px;background:var(--green);color:#fff;
+  font:inherit;font-size:16px;font-weight:600;cursor:pointer;margin-top:6px}
+button:disabled{background:#A9BDB5;cursor:default}
+.msg{margin-top:12px;padding:11px 13px;border-radius:10px;font-size:14.5px;display:none}
+.msg.ok{display:block;background:#EAF5F1;border-left:4px solid var(--green)}
+.msg.err{display:block;background:#FDEEEB;border-left:4px solid var(--terre)}
+.note{font-size:13.5px;color:var(--muted);margin:10px 0 0;line-height:1.6}
+code{background:var(--paper);padding:2px 6px;border-radius:5px;font-size:13px}
+ol{padding-left:20px;font-size:14.5px;margin:0}
+ol li{margin-bottom:7px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Chiffrer la base articles</h1>
+  <p class="sub">Transforme votre CSV en fichier <code>articles.enc</code>, illisible sans la phrase secrète. Tout se passe dans ce navigateur, aucune donnée n'est envoyée.</p>
+
+  <div class="card">
+    <h2>1. Votre fichier CSV</h2>
+    <input type="file" id="f" accept=".csv,.txt">
+    <p class="note">4 colonnes : code-barres, code-barres 2, n° article, désignation. Première ligne = libellés.</p>
+  </div>
+
+  <div class="card">
+    <h2>2. Phrase secrète</h2>
+    <label for="p1">Phrase secrète</label>
+    <input type="password" id="p1" autocomplete="off" placeholder="au moins 8 caractères">
+    <div style="height:12px"></div>
+    <label for="p2">Confirmation</label>
+    <input type="password" id="p2" autocomplete="off">
+    <p class="note">La même sera saisie une fois sur chaque téléphone. Notez-la : sans elle, le fichier est définitivement illisible.</p>
+  </div>
+
+  <button id="go">Chiffrer et télécharger</button>
+  <div class="msg" id="msg"></div>
+
+  <div class="card" style="margin-top:22px">
+    <h2>Ensuite</h2>
+    <ol>
+      <li>Déposez <code>articles.enc</code> sur GitHub, à côté de <code>releve-stock.html</code></li>
+      <li>Sur chaque téléphone : Réglages → phrase secrète → Synchroniser</li>
+      <li>À chaque mise à jour du catalogue, refaites l'opération et remplacez le fichier sur GitHub. Les téléphones se mettent à jour seuls à l'ouverture.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function say(t, err){ const m = $('msg'); m.textContent = t; m.className = 'msg ' + (err ? 'err' : 'ok'); }
+
+$('go').onclick = async () => {
+  const file = $('f').files[0];
+  const p1 = $('p1').value, p2 = $('p2').value;
+
+  if(!file)            return say('Choisissez d\'abord votre fichier CSV.', true);
+  if(p1.length < 8)    return say('Phrase secrète trop courte (8 caractères minimum).', true);
+  if(p1 !== p2)        return say('Les deux phrases ne correspondent pas.', true);
+  if(!crypto.subtle)   return say('Chiffrement indisponible : ouvrez cette page en HTTPS.', true);
+
+  $('go').disabled = true;
+  try{
+    let txt = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = e => res(e.target.result);
+      r.onerror = rej;
+      r.readAsText(file, 'windows-1252');
+    });
+    if(/Ã©|Ã¨|Ã /.test(txt)) txt = decodeURIComponent(escape(txt));
+    txt = txt.replace(/^\uFEFF/, '');
+
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv   = crypto.getRandomValues(new Uint8Array(12));
+    const km   = await crypto.subtle.importKey('raw', new TextEncoder().encode(p1), 'PBKDF2', false, ['deriveKey']);
+    const key  = await crypto.subtle.deriveKey(
+      { name:'PBKDF2', salt, iterations:200000, hash:'SHA-256' },
+      km, { name:'AES-GCM', length:256 }, false, ['encrypt']
+    );
+    const ct = new Uint8Array(await crypto.subtle.encrypt(
+      { name:'AES-GCM', iv }, key, new TextEncoder().encode(txt)
+    ));
+
+    const out = new Uint8Array(salt.length + iv.length + ct.length);
+    out.set(salt, 0); out.set(iv, salt.length); out.set(ct, salt.length + iv.length);
+
+    let bin = '';
+    out.forEach(b => bin += String.fromCharCode(b));
+    const blob = new Blob([btoa(bin)], { type:'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'articles.enc';
+    a.click();
+    URL.revokeObjectURL(a.href);
+
+    const n = txt.split(/\r?\n/).filter(l => l.trim()).length - 1;
+    say('Fichier articles.enc généré — ' + n + ' lignes d\'articles chiffrées.');
+  }catch(e){
+    say('Échec du chiffrement : ' + e.message, true);
+  }
+  $('go').disabled = false;
+};
+</script>
+</body>
+</html>

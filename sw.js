@@ -1,5 +1,5 @@
 /* Service worker : met l'application en cache pour un usage hors ligne (serres, zones sans réseau). */
-const CACHE = 'releve-stock-v1';
+const CACHE = 'releve-stock-v2';
 const ASSETS = [
   './',
   './releve-stock.html',
@@ -27,6 +27,7 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  if (e.request.url.includes('articles.enc')) return;   // toujours la version en ligne
   e.respondWith(
     caches.match(e.request).then(hit =>
       hit || fetch(e.request).then(res => {
