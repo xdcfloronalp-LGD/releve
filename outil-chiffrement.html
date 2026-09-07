@@ -79,13 +79,9 @@ $('go').onclick = async () => {
 
   $('go').disabled = true;
   try{
-    let txt = await new Promise((res, rej) => {
-      const r = new FileReader();
-      r.onload = e => res(e.target.result);
-      r.onerror = rej;
-      r.readAsText(file, 'windows-1252');
-    });
-    if(/Ã©|Ã¨|Ã /.test(txt)) txt = decodeURIComponent(escape(txt));
+    const buf = await file.arrayBuffer();
+    let txt = new TextDecoder('utf-8').decode(buf);
+    if(txt.indexOf('\uFFFD') !== -1) txt = new TextDecoder('windows-1252').decode(buf);
     txt = txt.replace(/^\uFEFF/, '');
 
     const salt = crypto.getRandomValues(new Uint8Array(16));
