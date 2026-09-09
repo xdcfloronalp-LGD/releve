@@ -154,7 +154,8 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
       <div class="warn" id="warnList" hidden></div>
       <div id="listBox"></div>
       <div id="exportBox" style="margin-top:16px;display:none">
-        <button class="btn btn-primary full" id="btnCsv">Télécharger le fichier CSV</button>
+        <button class="btn btn-primary full" id="btnCsv" style="margin-bottom:8px">Télécharger le fichier CSV</button>
+        <button class="btn btn-ghost full" id="btnShare" hidden>Enregistrer ou envoyer le fichier</button>
       </div>
     </section>
 
@@ -605,14 +606,38 @@ function exportGuard(){
   if(!items.filter(i=>i.d).length){ toast('Aucun article reconnu à exporter'); return false; }
   return true;
 }
+/* Le téléchargement échoue silencieusement si l'ancre n'est pas dans le DOM,
+   ou si l'URL du blob est révoquée avant que le navigateur ait commencé. */
+function download(f){
+  const url=URL.createObjectURL(f);
+  const a=document.createElement('a');
+  a.href=url; a.download=f.name; a.rel='noopener'; a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ a.remove(); URL.revokeObjectURL(url); }, 30000);
+}
+async function shareFile(f){
+  try{
+    await navigator.share({ files:[f], title:f.name });
+    return true;
+  }catch(e){ if(e.name!=='AbortError') toast('Partage refusé'); return false; }
+}
 $('btnCsv').onclick=()=>{
   if(!exportGuard()) return;
   const f=matrixFile();
-  const a=document.createElement('a'); a.href=URL.createObjectURL(f); a.download=f.name;
-  a.click(); URL.revokeObjectURL(a.href);
+  download(f);
   const inc=items.filter(i=>!i.d).length;
-  toast(inc ? inc+' article(s) inconnu(s) exclu(s)' : 'Fichier '+f.name);
+  toast(inc ? inc+' article(s) exclu(s) — '+f.name : f.name+' dans Téléchargements');
 };
+$('btnShare').onclick=()=>{
+  if(!exportGuard()) return;
+  shareFile(matrixFile());
+};
+/* Le partage n'est proposé que si le téléphone sait envoyer un fichier */
+try{
+  const test=new File(['a'],'t.csv',{type:'text/csv'});
+  if(navigator.canShare && navigator.canShare({files:[test]})) $('btnShare').hidden=false;
+}catch(e){}
 /* ===== Démarrage ===== */
 (async()=>{
   paintCtx(); paintList();

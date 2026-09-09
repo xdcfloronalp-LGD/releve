@@ -1,5 +1,5 @@
 /* Service worker : met l'application en cache pour un usage hors ligne (serres, zones sans réseau). */
-const CACHE = 'releve-stock-v12';
+const CACHE = 'releve-stock-v13';
 const ASSETS = [
   './',
   './releve-stock.html',
