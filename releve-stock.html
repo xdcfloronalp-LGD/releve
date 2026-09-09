@@ -154,14 +154,7 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
       <div class="warn" id="warnList" hidden></div>
       <div id="listBox"></div>
       <div id="exportBox" style="margin-top:16px;display:none">
-        <button class="btn btn-primary full" id="btnShare" style="margin-bottom:8px">Envoyer la matrice en pièce jointe</button>
-        <button class="btn btn-ghost full" id="btnXlsx" style="margin-bottom:14px">Télécharger la matrice</button>
-        <div style="font-size:13px;color:var(--muted);margin-bottom:7px">Envoyer le relevé en texte simple</div>
-        <div class="sheet-sub" style="margin-bottom:8px">
-          <button class="btn btn-ghost sm" id="btnWa">WhatsApp</button>
-          <button class="btn btn-ghost sm" id="btnMail">E-mail</button>
-        </div>
-        <button class="btn btn-ghost sm full" id="btnCopy">Copier le texte</button>
+        <button class="btn btn-primary full" id="btnCsv">Télécharger le fichier CSV</button>
       </div>
     </section>
 
@@ -188,15 +181,6 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
         <div class="stat" style="margin-bottom:12px;font-weight:500;color:var(--muted)">Dernière synchro : <span id="syncLabel" style="color:var(--muted)">jamais</span></div>
         <button class="btn btn-primary full" id="btnSync">Synchroniser maintenant</button>
         <div id="syncMsg" style="margin-top:10px;font-size:13.5px;line-height:1.5"></div>
-      </div>
-
-      <div class="card">
-        <h3>Destinataires</h3>
-        <div class="field">
-          <label for="fMail">Adresses e-mail (une par ligne)</label>
-          <textarea id="fMail" placeholder="production@exemple.fr&#10;achats@exemple.fr"></textarea>
-        </div>
-        <div class="field" style="margin-bottom:0"><label for="fTel">Numéro WhatsApp (33612345678)</label><input id="fTel" inputmode="tel" placeholder="33612345678"></div>
       </div>
 
       <div class="card">
@@ -315,12 +299,11 @@ document.querySelectorAll('nav button').forEach(b=>{
 /* ===== Contexte ===== */
 function paintCtx(){
   $('fSite').value=ctx.site; $('fOp').value=ctx.op;
-  $('fMail').value=ctx.mail; $('fTel').value=ctx.tel;
   $('fPass').value=ctx.pass||''; $('syncLabel').textContent=ctx.sync||'jamais';
   const s=SITES[ctx.site];
   $('ctxLabel').textContent = s ? (ctx.site+' · '+s.f+(ctx.op?' · '+ctx.op:'')) : 'Site non sélectionné';
 }
-[['fSite','site'],['fOp','op'],['fMail','mail'],['fTel','tel'],['fPass','pass']].forEach(([id,key])=>{
+[['fSite','site'],['fOp','op'],['fPass','pass']].forEach(([id,key])=>{
   $(id).addEventListener('input',e=>{ ctx[key]=e.target.value.trim(); store.set(K.CTX,ctx); paintCtx(); });
   $(id).addEventListener('change',e=>{ ctx[key]=e.target.value.trim(); store.set(K.CTX,ctx); paintCtx(); });
 });
@@ -590,38 +573,22 @@ $('btnClear').onclick=()=>{
 };
 
 /* ===== Export ===== */
-function siteLine(){
-  const s=SITES[ctx.site];
-  return s ? ctx.site+' — '+s.n+' (fournisseur '+s.f+')' : 'Site non renseigné';
-}
-function buildText(){
-  return 'RELEVÉ DE STOCK\nSite : '+siteLine()
-    + (ctx.op?'\nOpérateur : '+ctx.op:'')
-    + '\nDate : '+stamp()+'\n\n'
-    + items.map(i=>i.code+' ; '+(i.d||'?')+' ; '+i.q).join('\n')
-    + '\n\n'+items.length+' article(s) — '+nf.format(items.reduce((s,i)=>s+i.q,0))+' unité(s)';
-}
 /* ORDEXPEDATE : toujours la date du jour de l'envoi */
 function expeDate(){
-  const d = new Date();
-  const j = String(d.getDate()).padStart(2,'0');
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const a = d.getFullYear();
-  return { fr: j+'/'+m+'/'+a, compact: ''+a+m+j };
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return {
+    fr:      p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+d.getFullYear(),
+    compact: ''+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate()),
+    heure:   p(d.getHours())+'h'+p(d.getMinutes())
+  };
 }
-const mailList = () => (ctx.mail||'').split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean).join(',');
-$('btnWa').onclick=()=>window.open('https://wa.me/'+(ctx.tel||'').replace(/\D/g,'')+'?text='+encodeURIComponent(buildText()),'_blank');
-$('btnMail').onclick=()=>{
-  const s=SITES[ctx.site];
-  const sujet='Relevé de stock — '+(s?ctx.site:'site')+' — '+new Date().toLocaleDateString('fr-FR');
-  location.href='mailto:'+encodeURIComponent(mailList()).replace(/%2C/g,',')
-    +'?subject='+encodeURIComponent(sujet)+'&body='+encodeURIComponent(buildText());
-};
 /* Matrice d'import : CSV point-virgule, BOM UTF-8, CRLF,
    date JJ/MM/AAAA. Six colonnes, une ligne d'en-tête, puis une ligne par article. */
 const CSV_MIME='text/csv';
+/* Nom du fichier : date du dispo + site + heure d'envoi */
 function matrixName(){
-  return expeDate().compact+'-'+ORDNOORDER+'_SC_matrice_import_'+SITES[ctx.site].fic+'.csv';
+  const d = expeDate();
+  return d.compact+'_'+ctx.site+'_'+d.heure+'.csv';
 }
 function matrixFile(){
   const s=SITES[ctx.site], d=expeDate();
@@ -636,33 +603,14 @@ function exportGuard(){
   if(!items.filter(i=>i.d).length){ toast('Aucun article reconnu à exporter'); return false; }
   return true;
 }
-$('btnXlsx').onclick=()=>{
+$('btnCsv').onclick=()=>{
   if(!exportGuard()) return;
   const f=matrixFile();
   const a=document.createElement('a'); a.href=URL.createObjectURL(f); a.download=f.name;
   a.click(); URL.revokeObjectURL(a.href);
   const inc=items.filter(i=>!i.d).length;
-  toast(inc? inc+' article(s) inconnu(s) exclu(s)' : 'Matrice téléchargée');
+  toast(inc ? inc+' article(s) inconnu(s) exclu(s)' : 'Fichier '+f.name);
 };
-$('btnShare').onclick=async()=>{
-  if(!exportGuard()) return;
-  const f=matrixFile();
-  if(navigator.canShare && navigator.canShare({files:[f]})){
-    try{
-      await navigator.share({ files:[f], title:f.name,
-        text:'Relevé de stock '+ctx.site+' du '+expeDate().fr+(ctx.op?' — '+ctx.op:'') });
-    }catch(e){ if(e.name!=='AbortError') toast('Partage refusé'); }
-  }else{
-    const a=document.createElement('a'); a.href=URL.createObjectURL(f); a.download=f.name;
-    a.click(); URL.revokeObjectURL(a.href);
-    toast('Partage indisponible — fichier téléchargé');
-  }
-};
-$('btnCopy').onclick=async()=>{
-  try{ await navigator.clipboard.writeText(buildText()); toast('Texte copié'); }
-  catch(e){ toast('Copie impossible'); }
-};
-
 /* ===== Démarrage ===== */
 (async()=>{
   paintCtx(); paintList();
