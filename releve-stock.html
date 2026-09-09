@@ -111,6 +111,9 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
 .field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--green);outline-offset:-1px}
 .stat{font-size:15px;font-weight:600}
 .stat span{color:var(--green);font-variant-numeric:tabular-nums}
+.warn{background:#FDEEEB;border:1.5px solid var(--terre);color:#8C2E1E;border-radius:var(--radius);
+  padding:12px 14px;margin-bottom:12px;font-size:14.5px;line-height:1.5;font-weight:500}
+.warn b{display:block;margin-bottom:2px}
 .toast{position:fixed;left:50%;bottom:78px;transform:translateX(-50%) translateY(10px);background:var(--ink);
   color:#fff;padding:11px 18px;border-radius:24px;font-size:14.5px;font-weight:500;opacity:0;
   pointer-events:none;transition:.2s;z-index:80;max-width:88vw;text-align:center}
@@ -130,6 +133,7 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
 
   <main>
     <section class="view on" id="v-scan">
+      <div class="warn" id="warnBase" hidden><b>Base articles non chargée</b>Les scans ne trouveront aucune référence. Allez dans Réglages, saisissez la phrase secrète et appuyez sur Synchroniser.</div>
       <div id="reader"><div class="cam-idle" id="camIdle">Appuyez sur « Démarrer la caméra »<br>puis visez un code-barres article.</div></div>
       <div class="cam-row"><button class="btn btn-primary full" id="btnCam">Démarrer la caméra</button></div>
       <div class="manual">
@@ -147,6 +151,7 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
         <h2>Relevé en cours</h2>
         <button class="btn btn-ghost sm" id="btnClear">Vider</button>
       </div>
+      <div class="warn" id="warnList" hidden></div>
       <div id="listBox"></div>
       <div id="exportBox" style="margin-top:16px;display:none">
         <button class="btn btn-primary full" id="btnWa" style="margin-bottom:8px">Envoyer par WhatsApp</button>
@@ -180,6 +185,7 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
         <div class="stat" style="margin-bottom:10px;font-weight:500;color:var(--muted)">Codes reconnus : <span id="codeCount">0</span></div>
         <div class="stat" style="margin-bottom:12px;font-weight:500;color:var(--muted)">Dernière synchro : <span id="syncLabel" style="color:var(--muted)">jamais</span></div>
         <button class="btn btn-primary full" id="btnSync">Synchroniser maintenant</button>
+        <div id="syncMsg" style="margin-top:10px;font-size:13.5px;line-height:1.5"></div>
       </div>
 
       <div class="card">
@@ -231,8 +237,8 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
 <script>
 /* ===== Sites ===== */
 const SITES = {
-  JPS:{ n:'Jardins et Plantes de Saint-Jean', f:'930' },
-  JPV:{ n:'Jardins et Plantes de Vonnas',     f:'915' }
+  JPS:{ n:'Jardins et Plantes de Saint-Jean', f:'930', fic:'Saint-Jean' },
+  JPV:{ n:'Jardins et Plantes de Vonnas',     f:'915', fic:'Vonnas'     }
 };
 
 /* ===== Stockage ===== */
@@ -272,6 +278,10 @@ const K = { LIST:'rs_list_v2', CTX:'rs_ctx_v2' };
 let base  = { index:{}, arts:{} };
 let items = store.get(K.LIST, []);
 let ctx   = store.get(K.CTX, {site:'',op:'',mail:'',tel:'',pass:'',sync:'',etag:''});
+
+/* Valeurs fixes de la matrice d'import ERP */
+const ORDNOORDER = '1';
+const ORDCUSCAT  = 'BIG';
 
 const norm = s => String(s==null?'':s).replace(/\s/g,'').toUpperCase();
 const $  = id => document.getElementById(id);
@@ -354,8 +364,14 @@ function importCsv(txt){
   toast(nf.format(nA)+' articles, '+nf.format(Object.keys(out.index).length)+' codes');
 }
 function paintBase(){
-  $('baseCount').textContent=nf.format(Object.keys(base.arts).length);
+  const n=Object.keys(base.arts).length;
+  $('baseCount').textContent=nf.format(n);
   $('codeCount').textContent=nf.format(Object.keys(base.index).length);
+  $('warnBase').hidden = n>0;
+}
+function syncMsg(txt,err){
+  const d=$('syncMsg'); d.textContent=txt||'';
+  d.style.color = err ? 'var(--terre)' : 'var(--muted)';
 }
 $('btnBaseClear').onclick=()=>{
   if(!confirm('Supprimer la base articles ?')) return;
@@ -371,7 +387,7 @@ async function deriveKey(pass,salt){
 }
 async function syncBase(silent){
   const pass=(ctx.pass||'').trim();
-  if(!pass){ if(!silent) toast('Renseignez la phrase secrète'); return; }
+  if(!pass){ syncMsg('Phrase secrète non renseignée.',true); if(!silent) toast('Renseignez la phrase secrète'); return; }
   try{
     if(silent && Object.keys(base.arts).length && ctx.etag){
       try{
@@ -380,7 +396,9 @@ async function syncBase(silent){
       }catch(e){ return; }
     }
     if(!silent) toast('Téléchargement…');
-    const r=await fetch('articles.enc',{cache:'no-store'});
+    let r;
+    try{ r=await fetch('articles.enc',{cache:'no-store'}); }
+    catch(netErr){ throw new Error('reseau'); }
     if(!r.ok) throw new Error('absent');
     const etag=r.headers.get('etag')||'';
     const raw=Uint8Array.from(atob((await r.text()).replace(/\s/g,'')),c=>c.charCodeAt(0));
@@ -391,8 +409,15 @@ async function syncBase(silent){
       await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.slice(16,28)},key,raw.slice(28)));
     importCsv(plain);
     ctx.sync=stamp(); ctx.etag=etag; store.set(K.CTX,ctx); $('syncLabel').textContent=ctx.sync;
+    syncMsg('Base à jour.',false);
   }catch(e){
-    if(!silent) toast(e.message==='absent'?'Fichier articles.enc introuvable':'Phrase secrète incorrecte');
+    const m = e.message==='absent'
+      ? 'Fichier articles.enc introuvable à côté de l\'application. Vérifiez qu\'il est bien déposé sur GitHub.'
+      : (e.message==='reseau'
+        ? 'Pas de réseau : la base précédente reste utilisable.'
+        : 'Déchiffrement impossible. La phrase secrète ne correspond pas à celle utilisée pour chiffrer le fichier.');
+    syncMsg(m,true);
+    if(!silent) toast(e.message==='absent'?'articles.enc introuvable':'Phrase secrète incorrecte');
   }
 }
 $('btnSync').onclick=()=>syncBase(false);
@@ -461,7 +486,9 @@ function openSheet(scanned){
 
   beep(known);
   $('sCode').textContent=code;
-  $('sDesig').textContent=known?(art.d||'(désignation absente de la base)'):'Code inconnu de la base';
+  const vide = !Object.keys(base.arts).length;
+  $('sDesig').textContent = known ? (art.d||'(désignation absente de la base)')
+    : (vide ? 'Base articles non chargée' : 'Code inconnu de la base');
   $('sDesig').classList.toggle('unknown',!known);
   $('sMeta').textContent=(known&&norm(code)!==key)?'Code-barres scanné : '+scanned.trim():'';
 
@@ -540,6 +567,9 @@ function paintList(){
   if(!n){ box.innerHTML='<div class="empty">Aucun article relevé.<br>Scannez un code-barres pour commencer.</div>';
     $('exportBox').style.display='none'; return; }
   $('exportBox').style.display='';
+  const inc=items.filter(i=>!i.d).length;
+  $('warnList').hidden = !inc;
+  if(inc) $('warnList').innerHTML='<b>'+inc+' article(s) non reconnu(s)</b>Ils apparaissent en rouge et seront exclus de la matrice d\'import, car leur n° article est inconnu.';
   box.innerHTML=items.map((it,i)=>
     '<div class="item"><div class="txt"><div class="c">'+esc(it.code)+'</div>'+
     '<div class="d'+(it.d?'':' unknown')+'">'+esc(it.d||'Article inconnu')+'</div></div>'+
@@ -569,11 +599,22 @@ function buildText(){
     + items.map(i=>i.code+' ; '+(i.d||'?')+' ; '+i.q).join('\n')
     + '\n\n'+items.length+' article(s) — '+nf.format(items.reduce((s,i)=>s+i.q,0))+' unité(s)';
 }
-function buildCsv(){
-  const s=SITES[ctx.site]||{n:'',f:''}, d=stamp();
-  const rows=[['Code article','Désignation','Quantité','Site','Code fournisseur','Opérateur','Date']];
-  items.forEach(i=>rows.push([i.code,i.d,i.q,ctx.site,s.f,ctx.op,d]));
-  return '\uFEFF'+rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\r\n');
+/* ORDEXPEDATE : toujours la date du jour de l'envoi */
+function expeDate(){
+  const d = new Date();
+  const j = String(d.getDate()).padStart(2,'0');
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const a = d.getFullYear();
+  return { fr: j+'/'+m+'/'+a, compact: ''+a+m+j };
+}
+/* Matrice d'import ERP : ORDNOCUSTOMER;ORDNOORDER;ODLNOARTICLE;ODLQUANTITYORDER;ORDEXPEDATE;ORDCUSCAT */
+function buildMatrix(){
+  const s = SITES[ctx.site];
+  const d = expeDate();
+  const rows = [['ORDNOCUSTOMER','ORDNOORDER','ODLNOARTICLE','ODLQUANTITYORDER','ORDEXPEDATE','ORDCUSCAT']];
+  items.filter(i=>i.d).forEach(i=>
+    rows.push([ s?s.f:'', ORDNOORDER, i.code, i.q, d.fr, ORDCUSCAT ]));
+  return rows.map(r=>r.join(';')).join('\r\n')+'\r\n';
 }
 const mailList = () => (ctx.mail||'').split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean).join(',');
 $('btnWa').onclick=()=>window.open('https://wa.me/'+(ctx.tel||'').replace(/\D/g,'')+'?text='+encodeURIComponent(buildText()),'_blank');
@@ -584,10 +625,14 @@ $('btnMail').onclick=()=>{
     +'?subject='+encodeURIComponent(sujet)+'&body='+encodeURIComponent(buildText());
 };
 $('btnCsv').onclick=()=>{
-  const blob=new Blob([buildCsv()],{type:'text/csv;charset=utf-8'});
+  if(!ctx.site){ toast('Sélectionnez d\'abord le site'); return; }
+  const inconnus = items.filter(i=>!i.d).length;
+  const s = SITES[ctx.site], d = expeDate();
+  const blob=new Blob([buildMatrix()],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='releve_'+(ctx.site||'site')+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.download = d.compact+'-'+ORDNOORDER+'_SC_matrice_import_'+s.fic+'.csv';
   a.click(); URL.revokeObjectURL(a.href);
+  toast(inconnus ? inconnus+' article(s) inconnu(s) exclu(s)' : 'Matrice générée');
 };
 $('btnCopy').onclick=async()=>{
   try{ await navigator.clipboard.writeText(buildText()); toast('Texte copié'); }
