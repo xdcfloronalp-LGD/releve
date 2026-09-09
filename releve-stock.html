@@ -261,6 +261,7 @@ const K = { LIST:'rs_list_v2', CTX:'rs_ctx_v2' };
 
 /* base.index : code normalisé -> n° article
    base.arts  : n° article -> {d:désignation, b:unités/emballage, g:emballages/étage, e:étages/roll} */
+const BASE_V = 2;                 // version de l'analyse du CSV
 let base  = { index:{}, arts:{} };
 let items = store.get(K.LIST, []);
 let ctx   = store.get(K.CTX, {site:'',op:'',mail:'',tel:'',pass:'',sync:'',etag:''});
@@ -335,7 +336,7 @@ function importCsv(txt){
       const ref=(c[2]||'').trim(); if(!ref) return;
       const a={ d:(c[3]||'').trim() };
       const e=num(c[4]), g=num(c[5]), b=num(c[6]);   // étages/roll, emballages/étage, unités/emballage
-      if(b>1) a.b=b; if(g>1) a.g=g; if(e>1) a.e=e;
+      if(b>0) a.b=b; if(g>0) a.g=g; if(e>0) a.e=e;
       arts[ref]=a;
       [c[0],c[1],ref].forEach(k=>{ const key=norm(k); if(key) index[key]=ref; });
     });
@@ -345,7 +346,7 @@ function importCsv(txt){
   if(!Object.keys(out.arts).length) out=build(lines);
   const nA=Object.keys(out.arts).length;
   if(!nA){ toast('Aucun article reconnu'); return; }
-  base=out; idb.set('base',base); paintBase();
+  out.v=BASE_V; base=out; idb.set('base',base); paintBase();
   toast(nf.format(nA)+' articles, '+nf.format(Object.keys(out.index).length)+' codes');
 }
 function paintBase(){
@@ -484,11 +485,12 @@ function openSheet(scanned){
 
   /* multiplicateurs : emballage = b, étage = g×b, roll = e×g×b */
   const b=(art&&art.b)||0, g=(art&&art.g)||0, e=(art&&art.e)||0;
-  const mEmb=b, mEta=g&&b?g*b:0, mRol=e&&g&&b?e*g*b:0;
+  const mEmb=b, mEta=(g&&b)?g*b:0, mRol=(e&&g&&b)?e*g*b:0;
   const rows=[];
-  if(mRol) rows.push({k:'Rolls',      m:mRol});
-  if(mEta) rows.push({k:'Étages',     m:mEta});
-  if(mEmb) rows.push({k:'Emballages', m:mEmb});
+  /* on n'affiche une ligne que si elle apporte un multiple nouveau :
+     avec 1 plante par emballage, la ligne Emballages ferait doublon avec Unités */
+  const add=(k,m)=>{ if(m>1 && !rows.some(r=>r.m===m)) rows.push({k,m}); };
+  add('Rolls',mRol); add('Étages',mEta); add('Emballages',mEmb);
   rows.push({k:'Unités', m:1});
 
   $('sGrid').innerHTML=rows.map(r=>
@@ -617,6 +619,7 @@ $('btnCsv').onclick=()=>{
   await idb.open();
   base = await idb.get('base') || {index:{},arts:{}};
   if(!base.index||!base.arts) base={index:{},arts:{}};
+  if(base.v!==BASE_V && ctx.etag){ ctx.etag=''; store.set(K.CTX,ctx); }  // relire la base
   paintBase();
   if(ctx.pass) syncBase(true);
 })();
