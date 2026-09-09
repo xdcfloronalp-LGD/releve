@@ -154,12 +154,14 @@ nav button .badge{position:absolute;transform:translate(16px,-4px);background:va
       <div class="warn" id="warnList" hidden></div>
       <div id="listBox"></div>
       <div id="exportBox" style="margin-top:16px;display:none">
-        <button class="btn btn-primary full" id="btnWa" style="margin-bottom:8px">Envoyer par WhatsApp</button>
-        <button class="btn btn-ghost full" id="btnMail" style="margin-bottom:8px">Envoyer par e-mail</button>
-        <div class="sheet-sub">
-          <button class="btn btn-ghost sm" id="btnCsv">Fichier CSV</button>
-          <button class="btn btn-ghost sm" id="btnCopy">Copier le texte</button>
+        <button class="btn btn-primary full" id="btnShare" style="margin-bottom:8px">Envoyer la matrice en pièce jointe</button>
+        <button class="btn btn-ghost full" id="btnXlsx" style="margin-bottom:14px">Télécharger la matrice</button>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:7px">Envoyer le relevé en texte simple</div>
+        <div class="sheet-sub" style="margin-bottom:8px">
+          <button class="btn btn-ghost sm" id="btnWa">WhatsApp</button>
+          <button class="btn btn-ghost sm" id="btnMail">E-mail</button>
         </div>
+        <button class="btn btn-ghost sm full" id="btnCopy">Copier le texte</button>
       </div>
     </section>
 
@@ -607,15 +609,6 @@ function expeDate(){
   const a = d.getFullYear();
   return { fr: j+'/'+m+'/'+a, compact: ''+a+m+j };
 }
-/* Matrice d'import ERP : ORDNOCUSTOMER;ORDNOORDER;ODLNOARTICLE;ODLQUANTITYORDER;ORDEXPEDATE;ORDCUSCAT */
-function buildMatrix(){
-  const s = SITES[ctx.site];
-  const d = expeDate();
-  const rows = [['ORDNOCUSTOMER','ORDNOORDER','ODLNOARTICLE','ODLQUANTITYORDER','ORDEXPEDATE','ORDCUSCAT']];
-  items.filter(i=>i.d).forEach(i=>
-    rows.push([ s?s.f:'', ORDNOORDER, i.code, i.q, d.fr, ORDCUSCAT ]));
-  return rows.map(r=>r.join(';')).join('\r\n')+'\r\n';
-}
 const mailList = () => (ctx.mail||'').split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean).join(',');
 $('btnWa').onclick=()=>window.open('https://wa.me/'+(ctx.tel||'').replace(/\D/g,'')+'?text='+encodeURIComponent(buildText()),'_blank');
 $('btnMail').onclick=()=>{
@@ -624,15 +617,46 @@ $('btnMail').onclick=()=>{
   location.href='mailto:'+encodeURIComponent(mailList()).replace(/%2C/g,',')
     +'?subject='+encodeURIComponent(sujet)+'&body='+encodeURIComponent(buildText());
 };
-$('btnCsv').onclick=()=>{
-  if(!ctx.site){ toast('Sélectionnez d\'abord le site'); return; }
-  const inconnus = items.filter(i=>!i.d).length;
-  const s = SITES[ctx.site], d = expeDate();
-  const blob=new Blob([buildMatrix()],{type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download = d.compact+'-'+ORDNOORDER+'_SC_matrice_import_'+s.fic+'.csv';
+/* Matrice d'import : CSV point-virgule, BOM UTF-8, CRLF,
+   date JJ/MM/AAAA. Six colonnes, une ligne d'en-tête, puis une ligne par article. */
+const CSV_MIME='text/csv';
+function matrixName(){
+  return expeDate().compact+'-'+ORDNOORDER+'_SC_matrice_import_'+SITES[ctx.site].fic+'.csv';
+}
+function matrixFile(){
+  const s=SITES[ctx.site], d=expeDate();
+  const L=['ORDNOCUSTOMER;ORDNOORDER;ODLNOARTICLE;ODLQUANTITYORDER;ORDEXPEDATE;ORDCUSCAT'];
+  items.filter(i=>i.d).forEach(i=>
+    L.push([s.f,ORDNOORDER,i.code,i.q,d.fr,ORDCUSCAT].join(';')));
+  const txt='\uFEFF'+L.join('\r\n')+'\r\n';
+  return new File([txt],matrixName(),{type:CSV_MIME});
+}
+function exportGuard(){
+  if(!ctx.site){ toast('Sélectionnez d\'abord le site'); return false; }
+  if(!items.filter(i=>i.d).length){ toast('Aucun article reconnu à exporter'); return false; }
+  return true;
+}
+$('btnXlsx').onclick=()=>{
+  if(!exportGuard()) return;
+  const f=matrixFile();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(f); a.download=f.name;
   a.click(); URL.revokeObjectURL(a.href);
-  toast(inconnus ? inconnus+' article(s) inconnu(s) exclu(s)' : 'Matrice générée');
+  const inc=items.filter(i=>!i.d).length;
+  toast(inc? inc+' article(s) inconnu(s) exclu(s)' : 'Matrice téléchargée');
+};
+$('btnShare').onclick=async()=>{
+  if(!exportGuard()) return;
+  const f=matrixFile();
+  if(navigator.canShare && navigator.canShare({files:[f]})){
+    try{
+      await navigator.share({ files:[f], title:f.name,
+        text:'Relevé de stock '+ctx.site+' du '+expeDate().fr+(ctx.op?' — '+ctx.op:'') });
+    }catch(e){ if(e.name!=='AbortError') toast('Partage refusé'); }
+  }else{
+    const a=document.createElement('a'); a.href=URL.createObjectURL(f); a.download=f.name;
+    a.click(); URL.revokeObjectURL(a.href);
+    toast('Partage indisponible — fichier téléchargé');
+  }
 };
 $('btnCopy').onclick=async()=>{
   try{ await navigator.clipboard.writeText(buildText()); toast('Texte copié'); }
